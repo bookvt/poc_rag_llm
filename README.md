@@ -1,10 +1,16 @@
 # CV RAG Lab
 
-POC สำหรับเรียนรู้ RAG ด้วย CV ของตัวเอง รองรับ PDF ที่ดึงข้อความได้และ DOCX รวมข้อความในตาราง ใช้ `text-embedding-3-small` สำหรับค้นข้อความที่เกี่ยวข้อง และ `gpt-6-luna` สำหรับตอบคำถาม
+A local Streamlit proof of concept for asking questions about a CV using retrieval-augmented generation (RAG). Upload a text-based PDF or DOCX file, inspect the text and chunks the app extracts, and review the source passages used to answer each question.
 
-## เริ่มใช้งาน
+The Streamlit interface is currently in Thai. Answers are requested in the same language as the question.
 
-ต้องมี Python 3.9 ขึ้นไป และ OpenAI API key ที่เรียกโมเดลข้างต้นได้
+## Requirements
+
+- Python 3.9 or later
+- An OpenAI API key with access to `text-embedding-3-small` and `gpt-6-luna`
+- An internet connection for OpenAI API calls
+
+## Quick start
 
 ```bash
 python3 -m venv .venv
@@ -13,30 +19,38 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-ใส่ API key ใน `.env` เป็น `OPENAI_API_KEY=...` แล้วรัน:
+Set `OPENAI_API_KEY` in `.env` (or in your environment), then start the app:
 
 ```bash
 streamlit run app.py
 ```
 
-เปิด URL ที่ Streamlit แสดงใน terminal แล้วอัปโหลด CV เพื่อเริ่มถามคำถาม แอปตั้งค่าให้รับการเชื่อมต่อจากเครื่องนี้เท่านั้น ห้าม commit `.env` หรือไฟล์ CV; `.gitignore` ได้กันไฟล์เหล่านี้ไว้แล้ว
+Open the URL shown by Streamlit, upload a CV, and enter a question. The app accepts one PDF or DOCX file at a time, up to 10 MiB. By default, Streamlit listens on `localhost` only.
 
-## การทำงาน
+## How it works
 
-1. อ่านข้อความจาก PDF/DOCX และเก็บตำแหน่งหน้า/ย่อหน้า/ตาราง
-2. แบ่งข้อความเป็นช่วงที่ซ้อนทับกัน แล้วสร้าง embedding ของแต่ละช่วงครั้งเดียวต่อการอัปโหลด
-3. สร้าง embedding ของคำถาม ค้นด้วย cosine similarity แล้วช่วยจัดอันดับด้วยคำภาษาอังกฤษ/ตัวเลขที่ตรงกัน; คำถามเรื่องเบอร์โทรหรืออีเมลจะเลือกช่วงที่พบข้อมูลนั้นโดยตรง
-4. ส่งคำถามกับข้อความต้นฉบับสูงสุด 3 ช่วงให้ `gpt-6-luna` ตอบ และแสดงข้อความต้นทางเพื่อตรวจสอบ
+1. **Extract text.** The app reads text from PDF pages or DOCX paragraphs and table cells, retaining page or document locations as source labels.
+2. **Build an index.** It splits the text into overlapping chunks and creates embeddings with `text-embedding-3-small`. The index stays in the current Streamlit session.
+3. **Retrieve evidence.** Each question gets its own embedding. The app ranks chunks by cosine similarity, with local keyword and contact-detail matching to help surface exact terms, phone numbers, and email addresses.
+4. **Generate an answer.** Up to three retrieved chunks and the question are sent to `gpt-6-luna`. The app asks the model to answer from those chunks and cite them with references such as `[1]`. You can expand each answer to inspect the retrieved text and its source location.
 
-การตรวจคำตรง เบอร์โทร และอีเมลทำในเครื่อง ไม่เรียก LLM เพิ่ม แอปแสดงจำนวน tokens ที่ API รายงานสำหรับการสร้าง index และแต่ละคำตอบ พร้อมค่าใช้จ่ายประมาณด้วย [ราคา GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna) และ [ราคา text-embedding-3-small](https://developers.openai.com/api/docs/models/text-embedding-3-small) แบบ Standard ณ วันที่ 29 ก.ย. 2026 (รวมอัตรา cached input และ cache write) ราคาอาจเปลี่ยนได้ ยอดเรียกเก็บจริงให้ดูที่ OpenAI Usage
+The keyword and contact-detail checks run locally and do not make additional model calls. Each question is handled independently; previous chat messages are not sent as context. Similarity scores describe embedding proximity, not answer confidence.
 
-Embedding และประวัติคำถามอยู่ในหน่วยความจำของ Streamlit session; ปิด session แล้วต้องอัปโหลดและสร้าง embedding ใหม่ ไม่มี vector database ใน POC นี้ PDF ที่เป็นภาพสแกนล้วนต้องผ่าน OCR ก่อนจึงจะอ่านได้ หากมีข้อความที่เห็นใน PDF แต่ไม่มีในแผง “ดูข้อความทั้งหมดที่อ่านจาก CV” การค้นจะหาไม่เจอ DOCX ใน text box อาจไม่ถูกดึงข้อความออกมา
+## Data handling and limitations
 
-## ทดสอบ
+- Uploaded files, extracted text, embeddings, and chat history are held in Streamlit session memory. Switching files or ending the session clears the working index; the app has no vector database.
+- CV text is sent to OpenAI to create embeddings. Questions and retrieved CV excerpts are sent to OpenAI to generate answers. The generation request sets `store=False`. Use documents you are authorized to send to the API.
+- Scanned or image-only PDFs need OCR before upload. If text is missing from the app's extracted-text panel, it cannot be retrieved. Text inside DOCX text boxes may also be missed.
+- Answers depend on the extracted text and retrieved chunks. Check the displayed source passages before relying on an answer.
+- The app displays API-reported token usage and an estimated cost for indexing and answers. The estimate uses Standard API rates hard-coded in `rag.py` as of September 29, 2026; actual charges and current pricing may differ.
+
+`.gitignore` excludes `.env`, PDF files, and DOCX files. Keep API keys and personal CV data out of commits.
+
+## Run tests
 
 ```bash
 .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-ชุดทดสอบใช้ข้อมูลตัวอย่าง ไม่ใช้ CV จริง การทดสอบกับ OpenAI API ต้องมี key และมีค่าใช้จ่ายตามการใช้งาน
+The test suite uses sample data and mocked OpenAI responses; it does not require an API key. Running the app against the OpenAI API incurs usage charges.
